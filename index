@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Overberg">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Overberg Marine</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1020'/><text x='50' y='72' font-size='58' text-anchor='middle'>🌊</text></svg>">
+<style>
+/* ==================================================================
+   OVERBERG MARINE — PHONE EDITION
+   Swipe left/right between the three locations, or tap a tab.
+   Data: Open-Meteo Marine + Forecast APIs (free, no key).
+   Add to Home Screen on iOS/Android for a full-screen app.
+   Edit the LOCATIONS array in the script below to change points.
+   ================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  --page:      #0b1020;
+  --surface-1: #131a2e;
+  --surface-2: #18203a;
+  --hairline:  rgba(255,255,255,0.10);
+  --grid:      #232c46;
+  --axis:      #2f3956;
+
+  --text-primary:   #ffffff;
+  --text-secondary: #b9c2d6;
+  --text-muted:     #8791a8;
+
+  /* Validated categorical slots (dark surface #131a2e) */
+  --c-wave:  #3987e5;
+  --c-wind:  #d95926;
+  --c-tide:  #199e70;
+  --c-swell: #d55181;
+
+  --st-good:     #0ca30c;
+  --st-warning:  #fab219;
+  --st-serious:  #ec835a;
+  --st-critical: #d03b3b;
+
+  --head-h: 100px;   /* header + tabs, recalculated at runtime */
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;                 /* panes do the scrolling */
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+}
+
+/* ---------- Sticky header ---------- */
+.app-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 8px;
+  background: var(--page);
+}
+.app-head .title {
+  font-size: 16px; font-weight: 680; letter-spacing: -0.25px;
+  display: flex; align-items: center; gap: 7px;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+@media (max-width: 359px) { .app-head .title { font-size: 14px; } }
+.app-head .title .glyph { font-size: 17px; }
+.app-head .spacer { flex: 1 1 auto; }
+
+.seg {
+  display: inline-flex;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 2px;
+  flex: none;
+}
+.seg button {
+  appearance: none; border: 0; background: transparent;
+  color: var(--text-muted);
+  font: inherit; font-size: 12px; font-weight: 650;
+  padding: 7px 11px; border-radius: 8px;
+  min-height: 34px;
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--text-primary); }
+
+.icon-btn {
+  appearance: none; flex: none;
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 11px;
+  color: var(--text-secondary);
+  font-size: 16px; cursor: pointer;
+}
+.icon-btn:active { background: var(--surface-2); }
+.icon-btn.spin { animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.updated {
+  flex: none;
+  padding: 0 14px 8px;
+  font-size: 11px; color: var(--text-muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.pulse {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--st-good); flex: none;
+}
+
+/* ---------- Tabs ---------- */
+.tabs {
+  flex: none;
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--page);
+}
+.tabs button {
+  appearance: none; background: transparent; border: 0;
+  flex: 1 1 0; min-width: 0;
+  padding: 8px 6px 9px;
+  cursor: pointer;
+  border-bottom: 2.5px solid transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  transition: border-color .18s, color .18s;
+}
+.tabs .tab-name {
+  font-size: 11.5px; font-weight: 650; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.tabs .tab-val {
+  font-size: 10.5px; color: var(--text-muted); opacity: .8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tabs button[aria-selected="true"] { border-bottom-color: var(--c-wave); }
+.tabs button[aria-selected="true"] .tab-name { color: var(--text-primary); }
+.tabs button[aria-selected="true"] .tab-val { color: var(--text-secondary); opacity: 1; }
+
+/* ---------- Swipeable panes ---------- */
+.panes {
+  flex: 1 1 auto;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.panes::-webkit-scrollbar { display: none; }
+
+.pane {
+  flex: 0 0 100%;
+  width: 100%;
+  scroll-snap-align: start;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 12px calc(28px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 11px;
+}
+/* A scrolling flex column would otherwise squash its children to fit the
+   viewport — every block keeps its natural height instead. */
+.pane > * { flex: 0 0 auto; }
+
+/* ---------- Location heading ---------- */
+.loc-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px; }
+.loc-head h2 { font-size: 14px; font-weight: 650; letter-spacing: -0.1px; }
+.loc-head .sub { font-size: 11px; color: var(--text-muted); }
+
+/* ---------- Status chips ---------- */
+.chips { display: flex; gap: 7px; flex-wrap: wrap; padding: 0 2px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 650;
+  padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+}
+.chip .ico { font-size: 9px; line-height: 1; }
+
+/* ---------- Tiles ---------- */
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.tile {
+  background: var(--surface-1);
+  padding: 11px 13px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+}
+.tile .label {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-muted);
+  display: flex; align-items: center; gap: 5px;
+}
+.tile .label .swatch { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+.tile .value {
+  font-size: 26px; font-weight: 620; line-height: 1.1; letter-spacing: -0.6px;
+  display: flex; align-items: baseline; gap: 4px;
+}
+.tile .value .unit { font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0; }
+.tile .note {
+  font-size: 11px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 4px;
+  min-height: 15px; white-space: nowrap; overflow: hidden;
+}
+.tile .note .muted { color: var(--text-muted); }
+.arrow { flex: none; display: inline-block; vertical-align: -2px; }
+
+/* ---------- Chart card ---------- */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 12px 10px 8px;
+}
+.card-title {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 0 3px 1px;
+}
+.card-title h3 { font-size: 12.5px; font-weight: 650; }
+.card-title .hint { font-size: 10.5px; color: var(--text-muted); }
+
+.legend { display: flex; gap: 11px; flex-wrap: wrap; padding: 3px 3px 1px; }
+.legend .item { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-secondary); }
+.legend .key { width: 12px; height: 3px; border-radius: 2px; flex: none; }
+.legend .key.band { height: 9px; opacity: .38; }
+
+.plot { position: relative; width: 100%; touch-action: pan-y; }
+.plot svg { display: block; width: 100%; }
+
+.tooltip {
+  position: absolute; pointer-events: none; opacity: 0;
+  transform: translate(-50%, 0);
+  background: #0b1020f2;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 7px 9px;
+  font-size: 11.5px; line-height: 1.45;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0,0,0,.5);
+  transition: opacity .12s;
+  z-index: 5;
+}
+.tooltip .tt-time { color: var(--text-muted); font-size: 10px; margin-bottom: 2px; }
+.tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
+.tooltip .tt-row .k { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.tooltip .tt-row .n { color: var(--text-secondary); }
+.tooltip .tt-row .v { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; padding-left: 9px; }
+
+/* ---------- Tide chips ---------- */
+.tide-scroll {
+  display: flex; gap: 7px;
+  overflow-x: auto;
+  padding: 9px 3px 2px;
+  scrollbar-width: none;
+}
+.tide-scroll::-webkit-scrollbar { display: none; }
+.tide-chip {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px;
+  padding: 6px 10px; border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+}
+.tide-chip .k { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.tide-chip .t { font-weight: 650; font-variant-numeric: tabular-nums; }
+.tide-chip .h { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- Table ---------- */
+.btn-wide {
+  appearance: none; width: 100%;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  color: var(--text-secondary);
+  font: inherit; font-size: 12.5px; font-weight: 650;
+  padding: 12px; border-radius: 12px; cursor: pointer;
+  min-height: 46px;
+}
+.btn-wide:active { background: var(--surface-2); }
+.tablewrap {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 10px 0 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+table { border-collapse: collapse; font-size: 11.5px; }
+caption { text-align: left; color: var(--text-muted); font-size: 10.5px; padding: 0 12px 8px; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th { color: var(--text-muted); font-weight: 650; }
+th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface-1); }
+tbody tr.now td { background: #1b2740; }
+tbody tr.now td:first-child { background: #1b2740; font-weight: 700; }
+
+/* ---------- States ---------- */
+.skeleton { padding: 34px 6px; color: var(--text-muted); font-size: 12.5px; text-align: center; }
+.errbox {
+  padding: 12px 13px;
+  border: 1px solid rgba(208,59,59,0.45);
+  background: rgba(208,59,59,0.10);
+  border-radius: 12px;
+  font-size: 12px; color: #f3c6c6;
+}
+.notebox {
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  border-radius: 12px;
+  font-size: 11.5px; color: var(--text-secondary);
+}
+.foot { font-size: 10.5px; color: var(--text-muted); line-height: 1.6; padding: 4px 4px 0; }
+
+/* Landscape / tablet: two columns of cards inside a pane */
+@media (min-width: 620px) and (orientation: landscape) {
+  .tiles { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="app-head">
+  <div class="title"><span class="glyph">🌊</span> Overberg Marine</div>
+  <div class="spacer"></div>
+  <div class="seg" role="group" aria-label="Wind speed units">
+    <button id="u-kmh" aria-pressed="true">km/h</button>
+    <button id="u-kt"  aria-pressed="false">kn</button>
+  </div>
+  <button class="icon-btn" id="refresh" aria-label="Refresh data">↻</button>
+</div>
+
+<div class="updated"><span class="pulse" aria-hidden="true"></span><span id="updated">Loading…</span></div>
+
+<nav class="tabs" id="tabs" role="tablist" aria-label="Locations"></nav>
+
+<main class="panes" id="panes"></main>
+
+<script>
+/* ==================================================================
+   1. CONFIG  — edit these three points to move the dashboard
+   ================================================================== */
+
+const LOCATIONS = [
+  { id:'danger',   name:'Danger Point', tab:'Gansbaai',  sub:'Gansbaai · open swell',      lat:-34.640, lon:19.290 },
+  { id:'dieplaat', name:'Die Plaat',    tab:'Walker Bay',sub:'Walker Bay · sheltered',     lat:-34.480, lon:19.290 },
+  { id:'agulhas',  name:'Cape Agulhas', tab:'Agulhas',   sub:'Southern tip · two oceans',  lat:-34.860, lon:20.010 }
+];
+
+const TZ = 'Africa/Johannesburg';
+const REFRESH_MS = 10 * 60 * 1000;
+const STALE_MS   = 5 * 60 * 1000;   // refresh on return to app if older than this
+const HOURS_BACK = 6;
+const HOURS_FWD  = 42;
+
+const COLORS = {
+  wave:'#3987e5', swell:'#d55181', wind:'#d95926', tide:'#199e70',
+  grid:'#232c46', axis:'#2f3956', muted:'#8791a8', text:'#b9c2d6', now:'#ffffff'
+};
+const STATUS = { good:'#0ca30c', warning:'#fab219', serious:'#ec835a', critical:'#d03b3b' };
+
+let UNIT = 'kmh';
+const store = {};
+let charts = [];
+let lastLoad = 0;
+
+/* ==================================================================
+   2. HELPERS
+   ================================================================== */
+
+const CARDINALS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+function cardinal(d){ if(d==null||isNaN(d)) return '–'; return CARDINALS[Math.round(((d%360)+360)%360/22.5)%16]; }
+
+function arrowSvg(fromDeg, color, size){
+  if (fromDeg == null || isNaN(fromDeg)) return '';
+  const s = size || 13, rot = (fromDeg + 180) % 360;
+  return '<svg class="arrow" width="'+s+'" height="'+s+'" viewBox="0 0 24 24" aria-hidden="true">'+
+    '<g transform="rotate('+rot.toFixed(1)+' 12 12)">'+
+    '<path d="M12 3 L12 21 M12 3 L7.2 9.4 M12 3 L16.8 9.4" fill="none" stroke="'+color+
+    '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></g></svg>';
+}
+
+const BEAUFORT = [[1,'Calm'],[5,'Light air'],[11,'Light breeze'],[19,'Gentle breeze'],[28,'Moderate breeze'],
+  [38,'Fresh breeze'],[49,'Strong breeze'],[61,'Near gale'],[74,'Gale'],[88,'Strong gale'],
+  [102,'Storm'],[117,'Violent storm'],[999,'Hurricane force']];
+function beaufort(k){ for(let i=0;i<BEAUFORT.length;i++) if(k<BEAUFORT[i][0]) return {force:i,name:BEAUFORT[i][1]}; return {force:12,name:'Hurricane force'}; }
+function windStatus(k){ if(k==null) return null; return k<20?'good':k<39?'warning':k<62?'serious':'critical'; }
+function waveStatus(m){ if(m==null) return null; return m<1?'good':m<2?'warning':m<3.5?'serious':'critical'; }
+const STATUS_ICON = { good:'●', warning:'▲', serious:'▲', critical:'■' };
+const STATUS_WORD = { good:'calm', warning:'moderate', serious:'rough', critical:'severe' };
+
+function windVal(k){ return UNIT==='kt' ? k/1.852 : k; }
+function windUnit(){ return UNIT==='kt' ? 'kn' : 'km/h'; }
+function num(v,d){ return (v==null||isNaN(v)) ? '–' : v.toFixed(d==null?1:d); }
+function fmtTime(d){ return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function fmtDay(d){ return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]; }
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function parseLocal(s){
+  const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+  return m ? new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5]) : new Date(s);
+}
+
+/* ==================================================================
+   3. FETCH
+   ================================================================== */
+
+const MARINE_FULL = ['wave_height','wave_direction','wave_period','swell_wave_height','swell_wave_direction',
+  'swell_wave_period','wind_wave_height','sea_surface_temperature','sea_level_height_msl'].join(',');
+const MARINE_CORE = ['wave_height','wave_direction','wave_period','swell_wave_height','swell_wave_direction','swell_wave_period'].join(',');
+
+async function getJSON(u){ const r = await fetch(u,{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }
+
+async function fetchMarine(loc){
+  const url = (vars, extra) =>
+    'https://marine-api.open-meteo.com/v1/marine?latitude='+loc.lat+'&longitude='+loc.lon+
+    '&hourly='+vars+'&current='+vars+'&timezone='+encodeURIComponent(TZ)+
+    '&past_days=1&forecast_days=3'+(extra||'');
+  const attempts = [url(MARINE_FULL,'&cell_selection=sea'), url(MARINE_FULL,''), url(MARINE_CORE,'&cell_selection=sea')];
+  let last;
+  for (const u of attempts) {
+    try { return await getJSON(u); } catch(e){ last=e; console.warn('marine fallback:', e.message); }
+  }
+  throw last;
+}
+
+function fetchWeather(loc){
+  return getJSON('https://api.open-meteo.com/v1/forecast?latitude='+loc.lat+'&longitude='+loc.lon+
+    '&current=temperature_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,wind_gusts_10m'+
+    '&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m'+
+    '&daily=sunrise,sunset&wind_speed_unit=kmh&timezone='+encodeURIComponent(TZ)+
+    '&past_days=1&forecast_days=3');
+}
+
+/* ==================================================================
+   4. SHAPE
+   ================================================================== */
+
+function buildSeries(marine, weather){
+  const wTimes = weather.hourly.time;
+  const idxByTime = new Map(); wTimes.forEach((t,i)=>idxByTime.set(t,i));
+  const mTimes = marine ? marine.hourly.time : wTimes;
+
+  const times=[],date=[],waveH=[],swellH=[],wavePer=[],swellPer=[],waveDir=[],swellDir=[],
+        tide=[],sst=[],wind=[],gust=[],windDir=[],airT=[];
+
+  for (let i=0;i<mTimes.length;i++){
+    const t=mTimes[i], wi=idxByTime.has(t)?idxByTime.get(t):-1;
+    times.push(t); date.push(parseLocal(t));
+    const mh = marine ? marine.hourly : null;
+    const pick = k => (mh && Array.isArray(mh[k]) && mh[k][i]!=null) ? mh[k][i] : null;
+    waveH.push(pick('wave_height'));       swellH.push(pick('swell_wave_height'));
+    wavePer.push(pick('wave_period'));     swellPer.push(pick('swell_wave_period'));
+    waveDir.push(pick('wave_direction'));  swellDir.push(pick('swell_wave_direction'));
+    tide.push(pick('sea_level_height_msl'));
+    sst.push(pick('sea_surface_temperature'));
+    wind.push(wi>=0?weather.hourly.wind_speed_10m[wi]:null);
+    gust.push(wi>=0?weather.hourly.wind_gusts_10m[wi]:null);
+    windDir.push(wi>=0?weather.hourly.wind_direction_10m[wi]:null);
+    airT.push(wi>=0?weather.hourly.temperature_2m[wi]:null);
+  }
+
+  const nights=[];
+  if (weather.daily && weather.daily.sunrise){
+    for (let d=0; d<weather.daily.sunrise.length; d++){
+      const sunset=parseLocal(weather.daily.sunset[d]);
+      const nextRise=weather.daily.sunrise[d+1]?parseLocal(weather.daily.sunrise[d+1]):null;
+      if (nextRise) nights.push({from:sunset,to:nextRise});
+      if (d===0){ const r0=parseLocal(weather.daily.sunrise[0]); nights.push({from:new Date(r0.getTime()-24*3600e3),to:r0}); }
+    }
+  }
+  return {times,date,waveH,swellH,wavePer,swellPer,waveDir,swellDir,tide,sst,wind,gust,windDir,airT,nights};
+}
+
+function tideExtremes(dates,v){
+  const out=[];
+  for (let i=1;i<v.length-1;i++){
+    const a=v[i-1],b=v[i],c=v[i+1];
+    if (a==null||b==null||c==null) continue;
+    const isHigh=b>a&&b>=c, isLow=b<a&&b<=c;
+    if (!isHigh&&!isLow) continue;
+    const den=(a-2*b+c); let off=0,peak=b;
+    if (den!==0){ off=0.5*(a-c)/den; if(off<-1||off>1) off=0; peak=b-0.25*(a-c)*off; }
+    out.push({type:isHigh?'high':'low', time:new Date(dates[i].getTime()+off*3600e3), height:peak, idx:i+off});
+  }
+  return out;
+}
+
+function tideNow(dates,v,now){
+  const ms=now.getTime();
+  for (let i=0;i<dates.length-1;i++){
+    const t0=dates[i].getTime(), t1=dates[i+1].getTime();
+    if (ms>=t0&&ms<=t1&&v[i]!=null&&v[i+1]!=null){
+      const f=(ms-t0)/(t1-t0);
+      return { height:v[i]+(v[i+1]-v[i])*f, rising:v[i+1]>=v[i] };
+    }
+  }
+  return { height:null, rising:null };
+}
+
+/* ==================================================================
+   5. CHART ENGINE (touch-first)
+   ================================================================== */
+
+const PAD = { t:12, r:10, b:22, l:32 };
+const PLOT_H = 168;
+
+function niceTicks(min,max,count){
+  const span=max-min||1, raw=span/count, mag=Math.pow(10,Math.floor(Math.log10(raw))), norm=raw/mag;
+  const step=(norm<=1?1:norm<=2?2:norm<=2.5?2.5:norm<=5?5:10)*mag;
+  const start=Math.ceil(min/step)*step, out=[];
+  for (let t=start;t<=max+step*0.001;t+=step) out.push(+t.toFixed(6));
+  return out;
+}
+function idxOfDate(dates,target){ return (target.getTime()-dates[0].getTime())/3600e3; }
+
+function makeChart(wrap, spec){
+  const tip = document.createElement('div');
+  tip.className = 'tooltip';
+  wrap.appendChild(tip);
+
+  function draw(){
+    const W = Math.max(260, wrap.clientWidth || 320);
+    const H = PLOT_H;
+    const iw = W - PAD.l - PAD.r, ih = H - PAD.t - PAD.b;
+    const n = spec.i1 - spec.i0;
+    // On a narrow screen a 6-hourly label row collides; fall back to 12-hourly.
+    const labelStep = W < 330 ? 12 : 6;
+
+    let lo=Infinity, hi=-Infinity;
+    const consider = v => { if(v!=null&&!isNaN(v)){ lo=Math.min(lo,v); hi=Math.max(hi,v);} };
+    spec.series.forEach(s=>{ for(let i=spec.i0;i<=spec.i1;i++) consider(s.data[i]); });
+    if (spec.band) for(let i=spec.i0;i<=spec.i1;i++){ consider(spec.band.lo[i]); consider(spec.band.hi[i]); }
+    if (!isFinite(lo)){ lo=0; hi=1; }
+    if (spec.zeroBase) lo=Math.min(0,lo);
+    const padv=(hi-lo)*0.16||0.5;
+    hi+=padv; lo = spec.zeroBase ? Math.min(0,lo) : lo-padv;
+    if (hi===lo) hi=lo+1;
+
+    const X = i => PAD.l + (i-spec.i0)/n*iw;
+    const Y = v => PAD.t + ih - (v-lo)/(hi-lo)*ih;
+
+    let g = '';
+
+    (spec.nights||[]).forEach(nt=>{
+      const a=idxOfDate(spec.dates,nt.from), b=idxOfDate(spec.dates,nt.to);
+      const x0=Math.max(PAD.l,X(Math.max(a,spec.i0))), x1=Math.min(PAD.l+iw,X(Math.min(b,spec.i1)));
+      if (x1>x0) g += '<rect x="'+x0.toFixed(1)+'" y="'+PAD.t+'" width="'+(x1-x0).toFixed(1)+'" height="'+ih+'" fill="#ffffff" opacity="0.030"/>';
+    });
+
+    niceTicks(lo,hi,3).forEach(t=>{
+      const y=Y(t);
+      if (y<PAD.t-1||y>PAD.t+ih+1) return;
+      g += '<line x1="'+PAD.l+'" y1="'+y.toFixed(1)+'" x2="'+(PAD.l+iw)+'" y2="'+y.toFixed(1)+
+           '" stroke="'+(Math.abs(t)<1e-9?COLORS.axis:COLORS.grid)+'" stroke-width="1"/>';
+      g += '<text x="'+(PAD.l-6)+'" y="'+(y+3.5).toFixed(1)+'" text-anchor="end" font-size="10" fill="'+COLORS.muted+
+           '" style="font-variant-numeric:tabular-nums">'+esc(spec.fmtTick?spec.fmtTick(t):t)+'</text>';
+    });
+
+    for (let i=spec.i0;i<=spec.i1;i++){
+      const d=spec.dates[i];
+      if (d.getHours()%labelStep!==0) continue;
+      const x=X(i);
+      if (d.getHours()===0) g += '<line x1="'+x.toFixed(1)+'" y1="'+PAD.t+'" x2="'+x.toFixed(1)+'" y2="'+(PAD.t+ih)+'" stroke="'+COLORS.axis+'" stroke-width="1"/>';
+      const lbl = d.getHours()===0 ? fmtDay(d) : String(d.getHours()).padStart(2,'0');
+      g += '<text x="'+x.toFixed(1)+'" y="'+(PAD.t+ih+13)+'" text-anchor="middle" font-size="10" fill="'+COLORS.muted+'">'+lbl+'</text>';
+    }
+
+    if (spec.band){
+      let up='',dn='';
+      for (let i=spec.i0;i<=spec.i1;i++){ if(spec.band.hi[i]==null) continue; up += (up?'L':'M')+X(i).toFixed(1)+' '+Y(spec.band.hi[i]).toFixed(1)+' '; }
+      for (let i=spec.i1;i>=spec.i0;i--){ if(spec.band.lo[i]==null) continue; dn += 'L'+X(i).toFixed(1)+' '+Y(spec.band.lo[i]).toFixed(1)+' '; }
+      if (up) g += '<path d="'+up+dn+'Z" fill="'+spec.band.color+'" opacity="0.20"/>';
+    }
+
+    spec.series.forEach((s,si)=>{
+      let line='';
+      for (let i=spec.i0;i<=spec.i1;i++){
+        if (s.data[i]==null||isNaN(s.data[i])) continue;
+        line += (line?'L':'M')+X(i).toFixed(1)+' '+Y(s.data[i]).toFixed(1)+' ';
+      }
+      if (!line) return;
+      if (s.fill){
+        const gid='grad-'+spec.uid+'-'+si;
+        g = '<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0" y2="1">'+
+            '<stop offset="0%" stop-color="'+s.color+'" stop-opacity="0.34"/>'+
+            '<stop offset="100%" stop-color="'+s.color+'" stop-opacity="0.02"/></linearGradient></defs>'+g;
+        const base=Y(Math.max(lo, spec.zeroBase?0:lo));
+        g += '<path d="'+line+'L'+X(spec.i1).toFixed(1)+' '+base.toFixed(1)+'L'+X(spec.i0).toFixed(1)+' '+base.toFixed(1)+'Z" fill="url(#'+gid+')"/>';
+      }
+      g += '<path d="'+line+'" fill="none" stroke="'+s.color+'" stroke-width="'+(s.width||2)+'" stroke-linecap="round" stroke-linejoin="round"/>';
+    });
+
+    (spec.markers||[]).forEach(m=>{
+      if (m.idx<spec.i0||m.idx>spec.i1) return;
+      const x=X(m.idx), y=Y(m.value);
+      g += '<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="3.4" fill="'+m.color+'" stroke="#131a2e" stroke-width="2"/>';
+      if (!m.label) return;
+      let ty = m.type==='high' ? y-8 : y+14;
+      ty = Math.max(PAD.t+9, Math.min(PAD.t+ih-2, ty));
+      let anchor='middle', tx=x;
+      if (x<PAD.l+22){ anchor='start'; tx=PAD.l; }
+      else if (x>PAD.l+iw-22){ anchor='end'; tx=PAD.l+iw; }
+      g += '<text x="'+tx.toFixed(1)+'" y="'+ty.toFixed(1)+'" text-anchor="'+anchor+'" font-size="9.5" font-weight="650" fill="'+
+           COLORS.text+'" style="font-variant-numeric:tabular-nums">'+esc(m.label)+'</text>';
+    });
+
+    if (spec.nowIdx>=spec.i0 && spec.nowIdx<=spec.i1){
+      const x=X(spec.nowIdx);
+      g += '<line x1="'+x.toFixed(1)+'" y1="'+PAD.t+'" x2="'+x.toFixed(1)+'" y2="'+(PAD.t+ih)+'" stroke="'+COLORS.now+'" stroke-width="1" opacity="0.5"/>';
+      g += '<text x="'+x.toFixed(1)+'" y="'+(PAD.t-3)+'" text-anchor="middle" font-size="8.5" font-weight="700" fill="'+COLORS.now+'" opacity="0.72">NOW</text>';
+    }
+
+    g += '<g id="'+spec.uid+'-hover"></g>';
+    g += '<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="transparent" data-hit="1"/>';
+
+    wrap.querySelectorAll('svg').forEach(el=>el.remove());
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    svg.setAttribute('width',W); svg.setAttribute('height',H);
+    svg.setAttribute('role','img'); svg.setAttribute('aria-label', spec.aria||'');
+    svg.innerHTML = g;
+    wrap.insertBefore(svg, tip);
+
+    const hover = svg.querySelector('#'+spec.uid+'-hover');
+    const hit = svg.querySelector('[data-hit]');
+
+    function show(clientX){
+      const r = svg.getBoundingClientRect();
+      const sx = (clientX - r.left) * (W / r.width);
+      let i = Math.round(spec.i0 + (sx - PAD.l)/iw*n);
+      i = Math.max(spec.i0, Math.min(spec.i1, i));
+      const x = X(i);
+      let marks = '<line x1="'+x.toFixed(1)+'" y1="'+PAD.t+'" x2="'+x.toFixed(1)+'" y2="'+(PAD.t+ih)+'" stroke="'+COLORS.text+'" stroke-width="1" opacity="0.4"/>';
+      spec.series.forEach(s=>{
+        if (s.data[i]==null) return;
+        marks += '<circle cx="'+x.toFixed(1)+'" cy="'+Y(s.data[i]).toFixed(1)+'" r="4.5" fill="'+s.color+'" stroke="#131a2e" stroke-width="2"/>';
+      });
+      hover.innerHTML = marks;
+
+      const d = spec.dates[i];
+      let html = '<div class="tt-time">'+fmtDay(d)+' '+fmtTime(d)+'</div>';
+      spec.series.forEach(s=>{
+        html += '<div class="tt-row"><span class="k" style="background:'+s.color+'"></span><span class="n">'+esc(s.label)+
+                '</span><span class="v">'+esc(spec.fmt(s.data[i],i))+'</span></div>';
+      });
+      if (spec.band) html += '<div class="tt-row"><span class="k" style="background:'+spec.band.color+';opacity:.4"></span><span class="n">'+
+        esc(spec.band.label)+'</span><span class="v">'+esc(spec.fmt(spec.band.hi[i],i))+'</span></div>';
+      (spec.extraRows||[]).forEach(er=>{
+        const v = er.get(i); if (v==null) return;
+        html += '<div class="tt-row"><span class="k" style="background:transparent"></span><span class="n">'+esc(er.label)+
+                '</span><span class="v">'+esc(v)+'</span></div>';
+      });
+      tip.innerHTML = html;
+      tip.style.opacity = 1;
+      tip.style.left = (Math.max(78, Math.min(W-78, x)) / W * r.width) + 'px';
+      tip.style.top = (PAD.t + 2) / H * r.height + 'px';
+    }
+    function hide(){ tip.style.opacity = 0; hover.innerHTML = ''; }
+
+    // Touch: tap or drag to scrub. touch-action:pan-y on .plot keeps vertical
+    // scrolling while stopping a horizontal drag from swiping to the next pane.
+    // The readout stays put for a few seconds so you can actually read it —
+    // browsers fire synthetic mouse events after a tap, so once we have seen a
+    // real touch we ignore the mouse handlers entirely.
+    let touched = false, hideT;
+    hit.addEventListener('touchstart', e => { touched = true; clearTimeout(hideT); show(e.touches[0].clientX); }, { passive:true });
+    hit.addEventListener('touchmove',  e => { clearTimeout(hideT); show(e.touches[0].clientX); }, { passive:true });
+    hit.addEventListener('touchend',   () => { clearTimeout(hideT); hideT = setTimeout(hide, 5000); });
+    hit.addEventListener('touchcancel', hide);
+    // Mouse, for when this file is opened on a laptop instead
+    hit.addEventListener('mousemove', e => { if (!touched) show(e.clientX); });
+    hit.addEventListener('mouseleave', () => { if (!touched) hide(); });
+  }
+
+  draw();
+  return { draw };
+}
+
+/* ==================================================================
+   6. RENDER
+   ================================================================== */
+
+let uid = 0;
+
+function statusChip(kind, text){
+  return '<span class="chip" style="color:'+STATUS[kind]+';border-color:'+STATUS[kind]+'55"><span class="ico">'+
+    STATUS_ICON[kind]+'</span>'+esc(text)+'</span>';
+}
+function tileHtml(o){
+  return '<div class="tile"><div class="label">'+(o.swatch?'<span class="swatch" style="background:'+o.swatch+'"></span>':'')+
+    esc(o.label)+'</div><div class="value">'+o.value+(o.unit?'<span class="unit">'+esc(o.unit)+'</span>':'')+
+    '</div><div class="note">'+(o.note||'')+'</div></div>';
+}
+function cardHtml(uidStr, title, hint, legend){
+  return '<div class="card"><div class="card-title"><h3>'+esc(title)+'</h3><span class="hint">'+esc(hint)+'</span></div>'+
+    (legend.length ? '<div class="legend">'+legend.map(l=>'<span class="item"><span class="key'+(l.band?' band':'')+
+      '" style="background:'+l.color+'"></span>'+esc(l.label)+'</span>').join('')+'</div>' : '') +
+    '<div class="plot" id="'+uidStr+'"></div></div>';
+}
+
+function scaffold(){
+  document.getElementById('tabs').innerHTML = LOCATIONS.map((l,i)=>
+    '<button role="tab" data-i="'+i+'" aria-selected="'+(i===0)+'" aria-controls="pane-'+l.id+'">'+
+    '<span class="tab-name">'+esc(l.tab)+'</span><span class="tab-val" id="tabval-'+l.id+'">–</span></button>'
+  ).join('');
+  document.getElementById('panes').innerHTML = LOCATIONS.map(l=>
+    '<section class="pane" id="pane-'+l.id+'" role="tabpanel"><div class="skeleton">Fetching wave, tide and wind data…</div></section>'
+  ).join('');
+}
+
+function renderLocation(loc){
+  const d = store[loc.id];
+  const pane = document.getElementById('pane-'+loc.id);
+  if (!pane) return;
+
+  const head = '<div class="loc-head"><h2>'+esc(loc.name)+'</h2><span class="sub">'+esc(loc.sub)+'</span></div>';
+
+  if (d && d.error){
+    pane.innerHTML = head + '<div class="errbox"><strong>Could not load data.</strong> '+esc(d.error)+
+      ' — check your connection and tap ↻.</div>';
+    return;
+  }
+  if (!d){ pane.innerHTML = head + '<div class="skeleton">Fetching wave, tide and wind data…</div>'; return; }
+
+  const s = d.series, now = d.now;
+  const nowIdx = idxOfDate(s.date, now);
+  const ni = Math.round(nowIdx);
+  const i0 = Math.max(0, ni - HOURS_BACK);
+  const i1 = Math.min(s.date.length-1, ni + HOURS_FWD);
+
+  const cur = d.marineCurrent || {}, wx = d.weatherCurrent || {};
+  const pickCur = (k, arr) => cur[k]!=null ? cur[k] : arr[ni];
+
+  const waveH = pickCur('wave_height', s.waveH);
+  const waveP = pickCur('wave_period', s.wavePer);
+  const waveD = pickCur('wave_direction', s.waveDir);
+  const swH   = pickCur('swell_wave_height', s.swellH);
+  const swP   = pickCur('swell_wave_period', s.swellPer);
+  const swD   = pickCur('swell_wave_direction', s.swellDir);
+  const sstN  = pickCur('sea_surface_temperature', s.sst);
+
+  const windNow = wx.wind_speed_10m, gustNow = wx.wind_gusts_10m, windD = wx.wind_direction_10m;
+  const airNow = wx.temperature_2m, feels = wx.apparent_temperature;
+
+  const tn = tideNow(s.date, s.tide, now);
+  const exts = tideExtremes(s.date, s.tide);
+  const future = exts.filter(e => e.time > now).slice(0, 4);
+  const hasTide = s.tide.some(v => v != null);
+  const hasWave = s.waveH.some(v => v != null);
+
+  const wSt = windStatus(windNow), vSt = waveStatus(waveH);
+
+  // tab value strip
+  const tv = document.getElementById('tabval-'+loc.id);
+  if (tv) tv.textContent = (waveH!=null ? num(waveH,1)+' m' : '–') + ' · ' + (windNow!=null ? Math.round(windVal(windNow))+' '+windUnit() : '–');
+
+  let tiles = '';
+  tiles += tileHtml({ label:'Waves', swatch:COLORS.wave, value:num(waveH,1), unit:'m',
+    note:(waveD!=null?arrowSvg(waveD,COLORS.wave)+'<span>'+cardinal(waveD)+'</span>':'')+
+         '<span class="muted">·</span><span class="muted">'+num(waveP,0)+' s</span>' });
+  tiles += tileHtml({ label:'Wind', swatch:COLORS.wind, value:num(windVal(windNow),0), unit:windUnit(),
+    note:(windD!=null?arrowSvg(windD,COLORS.wind)+'<span>'+cardinal(windD)+'</span>':'')+
+         '<span class="muted">·</span><span class="muted">g '+num(windVal(gustNow),0)+'</span>' });
+  tiles += tileHtml({ label:'Tide', swatch:COLORS.tide,
+    value: hasTide ? (tn.height>=0?'+':'')+num(tn.height,2) : '–', unit: hasTide?'m':'',
+    note: hasTide
+      ? '<span>'+(tn.rising?'▲ Rising':'▼ Falling')+'</span>'+(future.length?'<span class="muted">·</span><span class="muted">'+
+        (future[0].type==='high'?'H':'L')+' '+fmtTime(future[0].time)+'</span>':'')
+      : '<span class="muted">not modelled here</span>' });
+  tiles += tileHtml({ label:'Swell', swatch:COLORS.swell, value:num(swH,1), unit:'m',
+    note:(swD!=null?arrowSvg(swD,COLORS.swell)+'<span>'+cardinal(swD)+'</span>':'')+
+         '<span class="muted">·</span><span class="muted">'+num(swP,0)+' s</span>' });
+  tiles += tileHtml({ label:'Sea temp', value:num(sstN,1), unit:'°C', note:'<span class="muted">surface</span>' });
+  tiles += tileHtml({ label:'Air temp', value:num(airNow,0), unit:'°C', note:'<span class="muted">feels '+num(feels,0)+'°</span>' });
+
+  const chips = (vSt?statusChip(vSt,'Sea '+STATUS_WORD[vSt]):'') +
+                (wSt?statusChip(wSt,'F'+beaufort(windNow).force+' · '+beaufort(windNow).name):'');
+
+  const uT='m'+(++uid), uV='m'+(++uid), uW='m'+(++uid);
+
+  const tideCard = hasTide
+    ? '<div class="card"><div class="card-title"><h3>Tide</h3><span class="hint">vs mean sea level</span></div>'+
+      '<div class="plot" id="'+uT+'"></div>'+
+      '<div class="tide-scroll">'+future.map(e=>
+        '<span class="tide-chip"><span class="k">'+(e.type==='high'?'▲ High':'▼ Low')+'</span>'+
+        '<span class="t">'+fmtDay(e.time)+' '+fmtTime(e.time)+'</span>'+
+        '<span class="h">'+(e.height>=0?'+':'')+num(e.height,2)+'</span></span>').join('')+'</div></div>'
+    : '';
+
+  pane.innerHTML =
+    head +
+    (chips ? '<div class="chips">'+chips+'</div>' : '') +
+    '<div class="tiles">'+tiles+'</div>' +
+    tideCard +
+    cardHtml(uV, 'Waves & swell', 'significant height', [
+      {color:COLORS.wave,label:'Wave'},{color:COLORS.swell,label:'Swell'}]) +
+    cardHtml(uW, 'Wind', '10 m, '+windUnit(), [
+      {color:COLORS.wind,label:'Wind'},{color:COLORS.wind,label:'Gust range',band:true}]) +
+    (!hasWave
+      ? '<div class="notebox">No marine model data for this grid cell — wind and air temperature are still live. Move the point further offshore in the LOCATIONS list.</div>'
+      : hasTide ? ''
+      : '<div class="notebox">The marine model has no tide value for this grid cell. Move the point a little further offshore in the LOCATIONS list.</div>') +
+    '<button class="btn-wide" data-table="'+loc.id+'" aria-expanded="false">▤ Hourly table</button>' +
+    '<div id="tbl-'+loc.id+'" hidden></div>' +
+    '<p class="foot">Tap and drag across a chart to read values. Tide is modelled sea level, not a gauge prediction — treat turn times as ±20 min.</p>';
+
+  const fmtM = v => v==null ? '–' : v.toFixed(2)+' m';
+  const fmtW = v => v==null ? '–' : Math.round(windVal(v))+' '+windUnit();
+
+  if (hasTide){
+    const markers = future.map(e=>({ idx:e.idx, value:e.height, type:e.type, color:COLORS.tide,
+        label: fmtTime(e.time) }))
+      .concat(exts.filter(e=>e.time<=now).slice(-1).map(e=>({ idx:e.idx, value:e.height, type:e.type, color:COLORS.tide, label:'' })));
+    charts.push(makeChart(document.getElementById(uT), {
+      uid:uT, dates:s.date, i0, i1, nowIdx, nights:s.nights,
+      series:[{label:'Sea level', color:COLORS.tide, data:s.tide, fill:true}],
+      markers, fmt:fmtM, fmtTick:t=>t.toFixed(1),
+      aria:'Tide at '+loc.name+' over 48 hours'
+    }));
+  }
+
+  charts.push(makeChart(document.getElementById(uV), {
+    uid:uV, dates:s.date, i0, i1, nowIdx, nights:s.nights, zeroBase:true,
+    series:[{label:'Wave', color:COLORS.wave, data:s.waveH, fill:true},
+            {label:'Swell', color:COLORS.swell, data:s.swellH}],
+    extraRows:[{label:'Period', get:i=> s.wavePer[i]==null?null:Math.round(s.wavePer[i])+' s'},
+               {label:'From',   get:i=> s.waveDir[i]==null?null:cardinal(s.waveDir[i])}],
+    fmt:fmtM, fmtTick:t=>t.toFixed(1),
+    aria:'Wave and swell height at '+loc.name+' over 48 hours'
+  }));
+
+  charts.push(makeChart(document.getElementById(uW), {
+    uid:uW, dates:s.date, i0, i1, nowIdx, nights:s.nights, zeroBase:true,
+    series:[{label:'Wind', color:COLORS.wind, data:s.wind}],
+    band:{lo:s.wind, hi:s.gust, color:COLORS.wind, label:'Gust'},
+    extraRows:[{label:'From', get:i=> s.windDir[i]==null?null:cardinal(s.windDir[i])},
+               {label:'Beaufort', get:i=> s.wind[i]==null?null:'F'+beaufort(s.wind[i]).force}],
+    fmt:fmtW, fmtTick:t=>String(Math.round(windVal(t))),
+    aria:'Wind speed and gusts at '+loc.name+' over 48 hours'
+  }));
+
+  const btn = pane.querySelector('[data-table]');
+  btn.addEventListener('click', ()=>{
+    const box = document.getElementById('tbl-'+loc.id);
+    const open = !box.hidden;
+    box.hidden = open;
+    btn.setAttribute('aria-expanded', String(!open));
+    btn.textContent = open ? '▤ Hourly table' : '▤ Hide table';
+    if (!open && !box.innerHTML) box.innerHTML = tableHtml(loc, s, i0, i1, ni);
+  });
+}
+
+function tableHtml(loc, s, i0, i1, nowI){
+  let rows='';
+  for (let i=i0;i<=i1;i++){
+    const d=s.date[i];
+    rows += '<tr'+(i===nowI?' class="now"':'')+'>'+
+      '<td>'+fmtDay(d)+' '+fmtTime(d)+'</td>'+
+      '<td>'+num(s.waveH[i],1)+'</td>'+
+      '<td>'+num(s.wavePer[i],0)+'</td>'+
+      '<td>'+cardinal(s.waveDir[i])+'</td>'+
+      '<td>'+num(s.swellH[i],1)+'</td>'+
+      '<td>'+num(windVal(s.wind[i]),0)+'</td>'+
+      '<td>'+num(windVal(s.gust[i]),0)+'</td>'+
+      '<td>'+cardinal(s.windDir[i])+'</td>'+
+      '<td>'+(s.tide[i]==null?'–':(s.tide[i]>=0?'+':'')+num(s.tide[i],2))+'</td>'+
+      '<td>'+num(s.sst[i],1)+'</td></tr>';
+  }
+  return '<div class="tablewrap"><table><caption>Hourly values — every figure in the charts, as text. Scroll sideways for more columns.</caption>'+
+    '<thead><tr><th>Time</th><th>Wave m</th><th>Per s</th><th>From</th><th>Swell m</th><th>Wind '+windUnit()+
+    '</th><th>Gust</th><th>From</th><th>Tide m</th><th>Sea °C</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+/* ==================================================================
+   7. TABS + SWIPE
+   ================================================================== */
+
+const panesEl = document.getElementById('panes');
+const tabsEl  = document.getElementById('tabs');
+
+function setActiveTab(i){
+  tabsEl.querySelectorAll('button').forEach((b,j)=> b.setAttribute('aria-selected', String(j===i)));
+}
+tabsEl.addEventListener('click', e => {
+  const b = e.target.closest('button[data-i]');
+  if (!b) return;
+  const i = +b.dataset.i;
+  panesEl.scrollTo({ left: i * panesEl.clientWidth, behavior: 'smooth' });
+  setActiveTab(i);
+});
+let sTimer;
+panesEl.addEventListener('scroll', () => {
+  clearTimeout(sTimer);
+  sTimer = setTimeout(() => {
+    const i = Math.round(panesEl.scrollLeft / Math.max(1, panesEl.clientWidth));
+    setActiveTab(Math.max(0, Math.min(LOCATIONS.length-1, i)));
+  }, 60);
+}, { passive: true });
+
+/* ==================================================================
+   8. BOOT / REFRESH
+   ================================================================== */
+
+function stamp(){
+  const t = new Date();
+  document.getElementById('updated').textContent =
+    'Updated ' + fmtTime(t) + ' · next 42 h · wind in ' + windUnit();
+}
+
+async function loadAll(){
+  const btn = document.getElementById('refresh');
+  btn.classList.add('spin');
+  charts = [];
+  await Promise.all(LOCATIONS.map(async loc => {
+    try {
+      const [marine, weather] = await Promise.all([ fetchMarine(loc).catch(()=>null), fetchWeather(loc) ]);
+      store[loc.id] = {
+        series: buildSeries(marine, weather),
+        marineCurrent: marine ? marine.current : null,
+        weatherCurrent: weather.current,
+        now: parseLocal(weather.current.time)
+      };
+    } catch(e){ store[loc.id] = { error: e.message || String(e) }; }
+  }));
+  LOCATIONS.forEach(renderLocation);
+  lastLoad = Date.now();
+  stamp();
+  btn.classList.remove('spin');
+}
+
+function setUnit(u){
+  if (UNIT === u) return;
+  UNIT = u;
+  document.getElementById('u-kmh').setAttribute('aria-pressed', String(u==='kmh'));
+  document.getElementById('u-kt').setAttribute('aria-pressed', String(u==='kt'));
+  charts = [];
+  LOCATIONS.forEach(renderLocation);
+  stamp();
+}
+
+document.getElementById('u-kmh').addEventListener('click', ()=>setUnit('kmh'));
+document.getElementById('u-kt').addEventListener('click', ()=>setUnit('kt'));
+document.getElementById('refresh').addEventListener('click', ()=>loadAll());
+
+let rTimer;
+window.addEventListener('resize', ()=>{
+  clearTimeout(rTimer);
+  rTimer = setTimeout(()=>{
+    charts.forEach(c=>c.draw());
+    const i = Math.round(panesEl.scrollLeft / Math.max(1, panesEl.clientWidth));
+    panesEl.scrollLeft = i * panesEl.clientWidth;   // keep the active pane snapped after rotation
+  }, 200);
+});
+
+// Coming back to the app after a while should show fresh numbers, not stale ones.
+document.addEventListener('visibilitychange', ()=>{
+  if (!document.hidden && Date.now() - lastLoad > STALE_MS) loadAll();
+});
+
+scaffold();
+loadAll();
+setInterval(()=>{ if (!document.hidden) loadAll(); }, REFRESH_MS);
+</script>
+</body>
+</html>
